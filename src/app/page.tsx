@@ -145,6 +145,21 @@ export default function WAScrub() {
     document.body.removeChild(link);
   }, [currentFileId, processedFiles, removeDate, removeTime]);
 
+  const downloadCurrentFileAsJson = useCallback(() => {
+    const file = processedFiles.find(f => f.id === currentFileId);
+    if (!file) return;
+
+    const jsonContent = JSON.stringify(file.cleanedMessages, null, 2);
+
+    const link = document.createElement('a');
+    link.href = URL.createObjectURL(new Blob([jsonContent], { type: 'application/json' }));
+    link.download = `WAScrub_${file.fileName}.json`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  }, [currentFileId, processedFiles]);
+
+
   const currentFile = useMemo(() =>
           processedFiles.find(f => f.id === currentFileId),
       [currentFileId, processedFiles]
@@ -267,13 +282,22 @@ export default function WAScrub() {
                         isDark={isDarkMode}
                     />
                   </div>
-                  <button
-                      onClick={downloadCurrentFile}
-                      style={styles.downloadButton()}
-                      disabled={!currentFile}
-                  >
-                    <i className="fas fa-download" /> Download
-                  </button>
+                  <div style={styles.downloadButtons}>
+                    <button
+                        onClick={downloadCurrentFile}
+                        style={styles.downloadButton()}
+                        disabled={!currentFile}
+                    >
+                      <i className="fas fa-download" /> Download TXT
+                    </button>
+                    <button
+                        onClick={downloadCurrentFileAsJson}
+                        style={styles.downloadButton()}
+                        disabled={!currentFile}
+                    >
+                      <i className="fas fa-file-code" /> Export JSON
+                    </button>
+                  </div>
                 </div>
                 <div style={styles.messagesList}>
                   {currentFile?.cleanedMessages.map((item, index) => (
@@ -567,6 +591,12 @@ const styles = {
     borderRadius: '4px',
   }),
 
+  downloadButtons: {
+    display: 'flex',
+    gap: '1rem',
+  } as CSSProperties,
+
+
   downloadButton: (): CSSProperties => ({
     padding: '0.75rem 1.5rem',
     backgroundColor: '#0070f3',
@@ -616,5 +646,3 @@ const styles = {
     animation: 'spin 1s linear infinite',
   } as CSSProperties,
 };
-
-
