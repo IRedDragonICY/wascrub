@@ -37,6 +37,7 @@ export default function WAScrub() {
   const [dragActive, setDragActive] = useState(false);
   const [isDarkMode, setIsDarkMode] = useState(false);
   const [anonymizeSender, setAnonymizeSender] = useState(false);
+  const [lastClickedIndex, setLastClickedIndex] = useState<number | null>(null);
 
   useEffect(() => {
     const darkModeMediaQuery = window.matchMedia('(prefers-color-scheme: dark)');
@@ -139,18 +140,31 @@ export default function WAScrub() {
   }, [handleFiles]);
 
   const handleFileClick = useCallback((id: string, e: React.MouseEvent) => {
+    const fileIndex = processedFiles.findIndex(file => file.id === id);
+    if (fileIndex === -1) return;
+
     setSelectedFiles(prev => {
       const newSelection = new Set(prev);
       if (e.ctrlKey || e.metaKey) {
         void (newSelection.has(id) ? newSelection.delete(id) : newSelection.add(id));
-      } else {
+        setLastClickedIndex(fileIndex);
+      } else if (e.shiftKey && lastClickedIndex !== null) {
+        newSelection.clear();
+        const startIndex = Math.min(lastClickedIndex, fileIndex);
+        const endIndex = Math.max(lastClickedIndex, fileIndex);
+        for (let i = startIndex; i <= endIndex; i++) {
+          newSelection.add(processedFiles[i].id);
+        }
+      }
+      else {
         newSelection.clear();
         newSelection.add(id);
+        setLastClickedIndex(fileIndex);
       }
       return newSelection;
     });
-    if (!e.ctrlKey && !e.metaKey) setCurrentFileId(id);
-  }, []);
+    if (!e.ctrlKey && !e.metaKey && !e.shiftKey) setCurrentFileId(id);
+  }, [processedFiles, lastClickedIndex]);
 
   const deleteFiles = useCallback((ids: string[]) => {
     setProcessedFiles(prev => {
@@ -163,17 +177,22 @@ export default function WAScrub() {
     setSelectedFiles(prev => new Set([...prev].filter(id => !ids.includes(id))));
   }, [currentFileId]);
 
-  const downloadCurrentFile = useCallback(() => {
-    const file = processedFiles.find(f => f.id === currentFileId);
-    if (!file) return;
-
-    const content = file.cleanedMessages.map(item => {
+  const downloadFileContent = useCallback((file: ProcessedFile) => {
+    return file.cleanedMessages.map(item => {
       const prefix = [
         removeDate ? null : item.date,
         removeTime ? null : item.time
       ].filter(Boolean).join(', ');
       return `${prefix ? `${prefix} - ` : ''}${item.sender}: ${item.message}`;
     }).join('\n');
+  }, [removeDate, removeTime]);
+
+
+  const downloadCurrentFile = useCallback(() => {
+    const file = processedFiles.find(f => f.id === currentFileId);
+    if (!file) return;
+
+    const content = downloadFileContent(file);
 
     const link = document.createElement('a');
     link.href = URL.createObjectURL(new Blob([content], { type: 'text/plain' }));
@@ -181,7 +200,7 @@ export default function WAScrub() {
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
-  }, [currentFileId, processedFiles, removeDate, removeTime]);
+  }, [currentFileId, processedFiles, downloadFileContent]);
 
   const downloadCurrentFileAsJson = useCallback(() => {
     const file = processedFiles.find(f => f.id === currentFileId);
@@ -196,6 +215,28 @@ export default function WAScrub() {
     link.click();
     document.body.removeChild(link);
   }, [currentFileId, processedFiles]);
+
+  const downloadSelectedFilesAsZip = useCallback(async () => {
+    if (selectedFiles.size === 0) return;
+
+    const zip = new JSZip();
+    selectedFiles.forEach(fileId => {
+      const file = processedFiles.find(f => f.id === fileId);
+      if (file) {
+        const content = downloadFileContent(file);
+        zip.file(`WAScrub_${file.fileName}`, content);
+      }
+    });
+
+    const blob = await zip.generateAsync({ type: "blob" });
+    const link = document.createElement('a');
+    link.href = URL.createObjectURL(blob);
+    link.download = `WAScrub_BulkExport.zip`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  }, [processedFiles, selectedFiles, downloadFileContent]);
+
 
   const currentFile = useMemo(() =>
           processedFiles.find(f => f.id === currentFileId),
@@ -291,7 +332,7 @@ export default function WAScrub() {
                   )}
                 </div>
                 <div style={{...getScrollbarStyle(isDarkMode), ...styles.fileList}}>
-                  {processedFiles.map(file => (
+                  {processedFiles.map((file) => (
                       <div
                           key={file.id}
                           style={styles.fileItem(
@@ -371,6 +412,14 @@ export default function WAScrub() {
                     >
                       <i className="fas fa-file-code" /> Export JSON
                     </button>
+                    {selectedFiles.size > 1 && (
+                        <button
+                            onClick={downloadSelectedFilesAsZip}
+                            style={styles.downloadButton()}
+                        >
+                          <i className="fas fa-file-archive" /> Bulk Export TXT
+                        </button>
+                    )}
                   </div>
                 </div>
                 <div style={{...getScrollbarStyle(isDarkMode), ...styles.messagesList}}>
