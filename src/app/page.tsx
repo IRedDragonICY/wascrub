@@ -13,6 +13,7 @@ interface CleanedMessage {
 interface ProcessedFile {
   id: string;
   fileName: string;
+  originalText: string;
   cleanedMessages: CleanedMessage[];
 }
 
@@ -104,6 +105,7 @@ export default function WAScrub() {
             newFiles.push({
               id: crypto.randomUUID(),
               fileName: textFile.name,
+              originalText: text,
               cleanedMessages: processChatText(text, anonymizeSender)
             });
           }
@@ -112,6 +114,7 @@ export default function WAScrub() {
           newFiles.push({
             id: crypto.randomUUID(),
             fileName: file.name,
+            originalText: text,
             cleanedMessages: processChatText(text, anonymizeSender)
           });
         }
@@ -248,25 +251,12 @@ export default function WAScrub() {
     if (currentFile) {
       const updatedFiles = processedFiles.map(file =>
           file.id === currentFileId
-              ? { ...file, cleanedMessages: processChatText(readFileContent(file.fileName, processedFiles), checked) }
+              ? { ...file, cleanedMessages: processChatText(file.originalText, checked) }
               : file
       );
       setProcessedFiles(updatedFiles);
     }
   }, [currentFile, currentFileId, processedFiles, setAnonymizeSender]);
-
-  const readFileContent = (fileName: string, files: ProcessedFile[]) => {
-    const file = files.find(f => f.fileName === fileName);
-    if (!file) return "";
-    let text = "";
-    if (file) {
-      text = file.cleanedMessages.map(item => {
-        return `${item.date}, ${item.time} - ${item.sender}: ${item.message}`;
-      }).join('\n');
-    }
-    return text;
-  };
-
 
 
   return (
@@ -660,6 +650,7 @@ const styles = {
     textOverflow: 'ellipsis',
     whiteSpace: 'nowrap',
     color: isDark ? '#e0e0e0' : '#1a1a1a',
+    userSelect: 'none',
   }),
 
   deleteButton: {
