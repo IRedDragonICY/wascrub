@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState, useCallback, useMemo, useEffect } from 'react';
+import JSZip from 'jszip';
 
 interface CleanedMessage {
   sender: string;
@@ -91,21 +92,35 @@ export default function WAScrub() {
   const handleFiles = useCallback(async (files: FileList) => {
     setProcessing(true);
     setError('');
+    const newFiles: ProcessedFile[] = [];
     try {
-      const newFiles = await Promise.all(
-          Array.from(files).map(async (file) => {
-            const text = await readFile(file);
-            return {
+      for (const file of Array.from(files)) {
+        if (file.name.toLowerCase().endsWith('.zip')) {
+          const zip = await JSZip.loadAsync(file);
+          const textFiles = Object.values(zip.files).filter(zipFile => !zipFile.dir && zipFile.name.toLowerCase().endsWith('.txt'));
+          for (const textFile of textFiles) {
+            const text = await textFile.async('text');
+            newFiles.push({
               id: crypto.randomUUID(),
-              fileName: file.name,
+              fileName: textFile.name,
               cleanedMessages: processChatText(text, anonymizeSender)
-            };
-          })
-      );
+            });
+          }
+        } else if (file.name.toLowerCase().endsWith('.txt')) {
+          const text = await readFile(file);
+          newFiles.push({
+            id: crypto.randomUUID(),
+            fileName: file.name,
+            cleanedMessages: processChatText(text, anonymizeSender)
+          });
+        }
+      }
+
       setProcessedFiles(prev => [...prev, ...newFiles]);
       if (!currentFileId && newFiles.length > 0) setCurrentFileId(newFiles[0].id);
-    } catch {
-      setError('Failed to process files. Ensure they match WhatsApp chat format.');
+    } catch (e) {
+      setError('Failed to process files. Ensure they match WhatsApp chat format or valid ZIP.');
+      console.error("File processing error:", e);
     } finally {
       setProcessing(false);
     }
@@ -229,7 +244,7 @@ export default function WAScrub() {
           <label style={styles.uploadLabel}>
             <input
                 type="file"
-                accept=".txt"
+                accept=".txt, .zip"
                 multiple
                 onChange={(e) => e.target.files && handleFiles(e.target.files)}
                 disabled={processing}
@@ -248,7 +263,7 @@ export default function WAScrub() {
                   Drag & Drop Files or Click to Browse
                 </span>
                     <div style={styles.uploadSubtext(isDarkMode)}>
-                      Supports multiple TXT files
+                      Supports multiple TXT and ZIP files
                     </div>
                   </>
               )}
