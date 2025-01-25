@@ -17,6 +17,14 @@ interface ProcessedFile {
 
 type CSSProperties = React.CSSProperties;
 
+const getScrollbarStyle = (isDark: boolean): CSSProperties => ({
+  flex: 1,
+  overflowY: 'auto',
+  paddingRight: '0.5rem',
+  scrollbarWidth: 'thin',
+  scrollbarColor: isDark ? '#4a4a4a #2d2d2d' : '#c1c1c1 #f8f9fa',
+});
+
 export default function WAScrub() {
   const [processedFiles, setProcessedFiles] = useState<ProcessedFile[]>([]);
   const [selectedFiles, setSelectedFiles] = useState<Set<string>>(new Set());
@@ -27,6 +35,7 @@ export default function WAScrub() {
   const [removeTime, setRemoveTime] = useState(true);
   const [dragActive, setDragActive] = useState(false);
   const [isDarkMode, setIsDarkMode] = useState(false);
+  const [anonymizeSender, setAnonymizeSender] = useState(false);
 
   useEffect(() => {
     const darkModeMediaQuery = window.matchMedia('(prefers-color-scheme: dark)');
@@ -55,9 +64,9 @@ export default function WAScrub() {
     });
   };
 
-  const processChatText = (text: string): CleanedMessage[] => {
+  const processChatText = (text: string, anonymize: boolean): CleanedMessage[] => {
     const messageRegex = /^(\d{1,2}\/\d{1,2}\/\d{2}),\s*(\d{1,2}:\d{2}\s*[AP]M)\s*-\s*(.+?):\s*(.*)/;
-    return text.split('\n').reduce<CleanedMessage[]>((acc, line) => {
+    const messages = text.split('\n').reduce<CleanedMessage[]>((acc, line) => {
       const match = line.trim().match(messageRegex);
       return match ? [...acc, {
         sender: match[3],
@@ -66,6 +75,17 @@ export default function WAScrub() {
         time: match[2]
       }] : acc;
     }, []);
+
+    if (anonymize) {
+      const senderMap = new Map<string, string>();
+      const senders = [...new Set(messages.map(msg => msg.sender))];
+      senders.forEach((sender, index) => {
+        senderMap.set(sender, `User${index + 1}`);
+      });
+      return messages.map(msg => ({ ...msg, sender: senderMap.get(msg.sender) || msg.sender }));
+    }
+
+    return messages;
   };
 
   const handleFiles = useCallback(async (files: FileList) => {
@@ -73,11 +93,14 @@ export default function WAScrub() {
     setError('');
     try {
       const newFiles = await Promise.all(
-          Array.from(files).map(async (file) => ({
-            id: crypto.randomUUID(),
-            fileName: file.name,
-            cleanedMessages: processChatText(await readFile(file))
-          }))
+          Array.from(files).map(async (file) => {
+            const text = await readFile(file);
+            return {
+              id: crypto.randomUUID(),
+              fileName: file.name,
+              cleanedMessages: processChatText(text, anonymizeSender)
+            };
+          })
       );
       setProcessedFiles(prev => [...prev, ...newFiles]);
       if (!currentFileId && newFiles.length > 0) setCurrentFileId(newFiles[0].id);
@@ -86,7 +109,7 @@ export default function WAScrub() {
     } finally {
       setProcessing(false);
     }
-  }, [currentFileId]);
+  }, [currentFileId, anonymizeSender]);
 
   const handleDrag = useCallback((e: React.DragEvent) => {
     e.preventDefault();
@@ -159,11 +182,36 @@ export default function WAScrub() {
     document.body.removeChild(link);
   }, [currentFileId, processedFiles]);
 
-
   const currentFile = useMemo(() =>
           processedFiles.find(f => f.id === currentFileId),
       [currentFileId, processedFiles]
   );
+
+  const handleAnonymizeSenderChange = useCallback((checked: boolean) => {
+    setAnonymizeSender(checked);
+    if (currentFile) {
+      const updatedFiles = processedFiles.map(file =>
+          file.id === currentFileId
+              ? { ...file, cleanedMessages: processChatText(readFileContent(file.fileName, processedFiles), checked) }
+              : file
+      );
+      setProcessedFiles(updatedFiles);
+    }
+  }, [currentFile, currentFileId, processedFiles, setAnonymizeSender]);
+
+  const readFileContent = (fileName: string, files: ProcessedFile[]) => {
+    const file = files.find(f => f.fileName === fileName);
+    if (!file) return "";
+    let text = "";
+    if (file) {
+      text = file.cleanedMessages.map(item => {
+        return `${item.date}, ${item.time} - ${item.sender}: ${item.message}`;
+      }).join('\n');
+    }
+    return text;
+  };
+
+
 
   return (
       <div style={styles.container(isDarkMode)}>
@@ -227,7 +275,7 @@ export default function WAScrub() {
                       </button>
                   )}
                 </div>
-                <div style={styles.fileList}>
+                <div style={{...getScrollbarStyle(isDarkMode), ...styles.fileList}}>
                   {processedFiles.map(file => (
                       <div
                           key={file.id}
@@ -281,6 +329,17 @@ export default function WAScrub() {
                         onChange={(e) => setRemoveTime(e.target.checked)}
                         isDark={isDarkMode}
                     />
+                    <Checkbox
+                        label={
+                          <>
+                            <i className="fas fa-user-secret" style={styles.iconSpacing} />
+                            Anonymize Senders
+                          </>
+                        }
+                        checked={anonymizeSender}
+                        onChange={(e) => handleAnonymizeSenderChange(e.target.checked)}
+                        isDark={isDarkMode}
+                    />
                   </div>
                   <div style={styles.downloadButtons}>
                     <button
@@ -299,7 +358,7 @@ export default function WAScrub() {
                     </button>
                   </div>
                 </div>
-                <div style={styles.messagesList}>
+                <div style={{...getScrollbarStyle(isDarkMode), ...styles.messagesList}}>
                   {currentFile?.cleanedMessages.map((item, index) => (
                       <MessageItem
                           key={index}
@@ -307,6 +366,7 @@ export default function WAScrub() {
                           removeDate={removeDate}
                           removeTime={removeTime}
                           isDark={isDarkMode}
+                          anonymizeSender={anonymizeSender}
                       />
                   ))}
                 </div>
@@ -334,27 +394,32 @@ const Checkbox = ({ label, checked, onChange, isDark }: {
     </label>
 );
 
-const MessageItem = ({ item, removeDate, removeTime, isDark }: {
+const MessageItem = ({ item, removeDate, removeTime, isDark, anonymizeSender }: {
   item: CleanedMessage;
   removeDate: boolean;
   removeTime: boolean;
   isDark: boolean;
-}) => (
-    <div style={styles.message(isDark)}>
-      <div style={styles.messageHeader}>
-        {!removeDate && <span style={styles.date(isDark)}>{item.date}</span>}
-        {!removeTime && <span style={styles.time(isDark)}>{item.time}</span>}
-        <span style={styles.sender()}>
+  anonymizeSender: boolean;
+}) => {
+  const senderName = anonymizeSender ? `User${parseInt(item.sender.replace('User', ''), 10) || 1}` : item.sender;
+  return (
+      <div style={styles.message(isDark)}>
+        <div style={styles.messageHeader}>
+          {!removeDate && <span style={styles.date(isDark)}>{item.date}</span>}
+          {!removeTime && <span style={styles.time(isDark)}>{item.time}</span>}
+          <span style={styles.sender()}>
         <i className="fas fa-user" style={styles.iconSpacing} />
-          {item.sender}
+            {senderName}
       </span>
+        </div>
+        <div style={styles.messageText(isDark)}>
+          <i className="fas fa-comment-dots" style={styles.iconSpacing} />
+          {item.message}
+        </div>
       </div>
-      <div style={styles.messageText(isDark)}>
-        <i className="fas fa-comment-dots" style={styles.iconSpacing} />
-        {item.message}
-      </div>
-    </div>
-);
+  );
+};
+
 
 const styles = {
   container: (isDark: boolean): CSSProperties => ({
@@ -446,10 +511,7 @@ const styles = {
 
   fileList: {
     flex: 1,
-    overflowY: 'auto',
     paddingRight: '0.5rem',
-    scrollbarWidth: 'thin',
-    scrollbarColor: ((isDark: boolean) => isDark ? '#4a4a4a #2d2d2d' : '#c1c1c1 #f8f9fa') as unknown as string,
   } as CSSProperties,
 
   previewSection: (isDark: boolean): CSSProperties => ({
@@ -465,11 +527,8 @@ const styles = {
 
   messagesList: {
     flex: 1,
-    overflowY: 'auto',
     paddingRight: '1rem',
     marginTop: '1rem',
-    scrollbarWidth: 'thin',
-    scrollbarColor: ((isDark: boolean) => isDark ? '#4a4a4a #2d2d2d' : '#c1c1c1 #f8f9fa') as unknown as string,
   } as CSSProperties,
 
   message: (isDark: boolean): CSSProperties => ({
