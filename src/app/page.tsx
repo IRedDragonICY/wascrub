@@ -43,6 +43,7 @@ export default function WAScrub() {
   const [lastClickedIndex, setLastClickedIndex] = useState<number | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [deleteMediaOmitted, setDeleteMediaOmitted] = useState(false);
+  const [isMobile, setIsMobile] = useState(false);
 
   const processChatText = useCallback((text: string, anonymize: boolean): CleanedMessage[] => {
     const messageRegex = /^(\d{1,2}\/\d{1,2}\/\d{2}),\s*(\d{1,2}:\d{2}\s*[AP]M)\s*-\s*(.+?):\s*(.+)/;
@@ -127,6 +128,10 @@ export default function WAScrub() {
 
 
   useEffect(() => {
+    setIsMobile(window.innerWidth <= 768);
+    const handleResize = () => setIsMobile(window.innerWidth <= 768);
+    window.addEventListener('resize', handleResize);
+
     const darkModeMediaQuery = window.matchMedia('(prefers-color-scheme: dark)');
     setIsDarkMode(darkModeMediaQuery.matches);
     const handler = (e: MediaQueryListEvent) => setIsDarkMode(e.matches);
@@ -159,6 +164,7 @@ export default function WAScrub() {
     window.addEventListener('drop', handleWindowDrop);
 
     return () => {
+      window.removeEventListener('resize', handleResize);
       darkModeMediaQuery.removeEventListener('change', handler);
       document.body.removeChild(script);
       window.removeEventListener('dragover', handleWindowDrag);
@@ -282,7 +288,6 @@ export default function WAScrub() {
     }
   }, [currentFile, currentFileId, processedFiles, processChatText]);
 
-  const isMobile = useMemo(() => window.innerWidth <= 768, []);
 
   return (
       <div style={styles.container(isDarkMode)}>
