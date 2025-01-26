@@ -17,7 +17,7 @@ import {
   ListItemIcon,
   Alert,
   CircularProgress,
-  Grid,
+  Grid2 as Grid,
   useMediaQuery,
 } from '@mui/material';
 import { useTheme } from '@mui/material/styles';
@@ -464,13 +464,16 @@ export default function WAScrub() {
                   borderColor: '#1E1E1E'
                 }
               }}>
-                <Grid item xs={12} md={4} sx={{
-                  borderRight: { md: '1px solid #1E1E1E' },
-                  height: '100%',
-                  display: 'flex',
-                  flexDirection: 'column',
-                  bgcolor: '#121212'
-                }}>
+                <Grid
+                    size={{ xs: 12, md: 4 }}
+                    sx={{
+                      borderRight: { md: '1px solid #1E1E1E' },
+                      height: '100%',
+                      display: 'flex',
+                      flexDirection: 'column',
+                      bgcolor: '#121212',
+                    }}
+                >
                   <Box sx={{
                     p: 2,
                     borderBottom: '1px solid #1E1E1E',
@@ -560,11 +563,13 @@ export default function WAScrub() {
                             <DescriptionIcon sx={{ color: '#0099ff' }} />
                           </ListItemIcon>
                           <ListItemText
-                              primaryTypographyProps={{
-                                sx: {
-                                  fontSize: '0.9rem',
-                                  color: '#EDEDED',
-                                  fontWeight: currentFileId === file.id ? 600 : 400
+                              slotProps={{
+                                primary: {
+                                  sx: {
+                                    fontSize: '0.9rem',
+                                    color: '#EDEDED',
+                                    fontWeight: currentFileId === file.id ? 600 : 400
+                                  }
                                 }
                               }}
                               primary={`${file.fileName} (${file.cleanedMessages.length})`}
@@ -582,12 +587,15 @@ export default function WAScrub() {
                   </List>
                 </Grid>
 
-                <Grid item xs={12} md={8} sx={{
-                  height: '100%',
-                  display: 'flex',
-                  flexDirection: 'column',
-                  bgcolor: '#0A0A0A'
-                }}>
+                <Grid
+                    size={{ xs: 12, md: 8 }}
+                    sx={{
+                      height: '100%',
+                      display: 'flex',
+                      flexDirection: 'column',
+                      bgcolor: '#0A0A0A',
+                    }}
+                >
                   <Box sx={{
                     p: 2,
                     borderBottom: '1px solid #1E1E1E',
