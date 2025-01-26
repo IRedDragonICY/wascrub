@@ -34,6 +34,7 @@ import CodeIcon from '@mui/icons-material/Code';
 import ArchiveIcon from '@mui/icons-material/Archive';
 import PersonIcon from '@mui/icons-material/Person';
 import ImageIcon from '@mui/icons-material/Image';
+import { FixedSizeList as VirtualizedList } from 'react-window';
 
 interface CleanedMessage {
   sender: string;
@@ -147,6 +148,22 @@ function WAScrub() {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [deleteMediaOmitted, setDeleteMediaOmitted] = useState(false);
   const isMobile = useMediaQuery(theme.breakpoints.down('sm'));
+  const messageListRef = useRef<VirtualizedList>(null);
+  const [listHeight, setListHeight] = useState(800);
+
+  useEffect(() => {
+    const calculateListHeight = () => {
+      setListHeight(window.innerHeight - 240);
+    };
+
+    calculateListHeight();
+    window.addEventListener('resize', calculateListHeight);
+
+    return () => {
+      window.removeEventListener('resize', calculateListHeight);
+    };
+  }, []);
+
 
   const processChatText = useCallback((text: string, anonymize: boolean): CleanedMessage[] => {
     const messageRegex = /^(\d{1,2}\/\d{1,2}\/\d{2}),\s*(\d{1,2}:\d{2}\s*[AP]M)\s*-\s*(.+?):\s*(.+)/;
@@ -370,6 +387,28 @@ function WAScrub() {
       setProcessedFiles(updatedFiles);
     }
   }, [currentFile, currentFileId, processedFiles, processChatText]);
+
+  const Row = useCallback(({ index, style }: { index: number; style: React.CSSProperties }) => {
+    const item = currentFile?.cleanedMessages.filter(msg => !deleteMediaOmitted || !msg.isMediaOmitted)[index];
+    if (!item) return null;
+    return (
+        <ListItem style={style} key={index}>
+          <MessageItem
+              item={item}
+              removeDate={removeDate}
+              removeTime={removeTime}
+              anonymizeSender={anonymizeSender}
+          />
+        </ListItem>
+    );
+  }, [currentFile, removeDate, removeTime, anonymizeSender, deleteMediaOmitted]);
+
+  const memoizedRow = useMemo(() => Row, [Row]);
+
+  const visibleMessages = useMemo(() =>
+          currentFile?.cleanedMessages.filter(item => !deleteMediaOmitted || !item.isMediaOmitted) || [],
+      [currentFile, deleteMediaOmitted]
+  );
 
   return (
       <Container
@@ -854,30 +893,17 @@ function WAScrub() {
                     </Box>
                   </Box>
 
-                  <List sx={{
-                    flex: 1,
-                    overflowY: 'auto',
-                    px: 2,
-                    '&::-webkit-scrollbar': {
-                      width: '8px'
-                    },
-                    '&::-webkit-scrollbar-thumb': {
-                      bgcolor: '#0099ff',
-                      borderRadius: '4px'
-                    }
-                  }}>
-                    {currentFile?.cleanedMessages
-                        .filter(item => !deleteMediaOmitted || !item.isMediaOmitted)
-                        .map((item, index) => (
-                            <MessageItem
-                                key={index}
-                                item={item}
-                                removeDate={removeDate}
-                                removeTime={removeTime}
-                                anonymizeSender={anonymizeSender}
-                            />
-                        ))}
-                  </List>
+                  <VirtualizedList
+                      height={listHeight}
+                      itemCount={visibleMessages.length}
+                      itemSize={80}
+                      width="100%"
+                      ref={messageListRef}
+                      overscanCount={10}
+                      style={{ overflowX: 'hidden' }}
+                  >
+                    {memoizedRow}
+                  </VirtualizedList>
                 </Grid>
               </Grid>
             </Box>
