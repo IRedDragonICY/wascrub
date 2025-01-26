@@ -50,7 +50,89 @@ interface ProcessedFile {
   cleanedMessages: CleanedMessage[];
 }
 
-export default function WAScrub() {
+const MessageItem = React.memo(({ item, removeDate, removeTime, anonymizeSender }: {
+  item: CleanedMessage;
+  removeDate: boolean;
+  removeTime: boolean;
+  anonymizeSender: boolean;
+}) => {
+  const senderName = anonymizeSender ? `User${parseInt(item.sender.replace('User', ''), 10) || 1}` : item.sender;
+
+  return (
+      <Box sx={{
+        bgcolor: '#121212',
+        borderRadius: '8px',
+        p: 2,
+        mb: 1.5,
+        border: '1px solid #1E1E1E',
+        transition: 'all 0.2s ease',
+        '&:hover': {
+          transform: 'translateX(4px)',
+          boxShadow: '0 4px 12px rgba(0,153,255,0.2)'
+        }
+      }}>
+        <Box sx={{
+          display: 'flex',
+          gap: 1,
+          alignItems: 'center',
+          mb: 1,
+          flexWrap: 'wrap'
+        }}>
+          {!removeDate && <Box sx={{
+            bgcolor: '#0099ff',
+            px: 1,
+            borderRadius: '4px',
+            fontSize: '0.75rem',
+            fontWeight: 500,
+            color: '#fff'
+          }}>
+            {item.date}
+          </Box>}
+          {!removeTime && <Box sx={{
+            bgcolor: '#1E1E1E',
+            px: 1,
+            borderRadius: '4px',
+            fontSize: '0.75rem',
+            color: '#EDEDED'
+          }}>
+            {item.time}
+          </Box>}
+          <Typography variant="subtitle2" sx={{
+            fontWeight: 700,
+            color: '#0099ff',
+            display: 'flex',
+            alignItems: 'center',
+            gap: 0.5
+          }}>
+            <PersonIcon sx={{ fontSize: '1rem', color: '#0099ff' }}/>
+            {senderName}
+          </Typography>
+        </Box>
+        <Typography variant="body2" sx={{
+          color: '#EDEDED',
+          lineHeight: 1.6,
+          pl: 1.5,
+          position: 'relative',
+          '&:before': {
+            content: '""',
+            position: 'absolute',
+            left: 0,
+            top: 4,
+            height: '16px',
+            width: '2px',
+            bgcolor: '#0099ff',
+            borderRadius: '2px'
+          }
+        }}>
+          {item.message}
+        </Typography>
+      </Box>
+  );
+});
+
+MessageItem.displayName = 'MessageItem';
+
+function WAScrub() {
   const [processedFiles, setProcessedFiles] = useState<ProcessedFile[]>([]);
   const [selectedFiles, setSelectedFiles] = useState<Set<string>>(new Set());
   const [currentFileId, setCurrentFileId] = useState<string | null>(null);
@@ -804,82 +886,6 @@ export default function WAScrub() {
   );
 }
 
-const MessageItem = ({ item, removeDate, removeTime, anonymizeSender }: {
-  item: CleanedMessage;
-  removeDate: boolean;
-  removeTime: boolean;
-  anonymizeSender: boolean;
-}) => {
-  const senderName = anonymizeSender ? `User${parseInt(item.sender.replace('User', ''), 10) || 1}` : item.sender;
+WAScrub.displayName = 'WAScrub';
 
-  return (
-      <Box sx={{
-        bgcolor: '#121212',
-        borderRadius: '8px',
-        p: 2,
-        mb: 1.5,
-        border: '1px solid #1E1E1E',
-        transition: 'all 0.2s ease',
-        '&:hover': {
-          transform: 'translateX(4px)',
-          boxShadow: '0 4px 12px rgba(0,153,255,0.2)'
-        }
-      }}>
-        <Box sx={{
-          display: 'flex',
-          gap: 1,
-          alignItems: 'center',
-          mb: 1,
-          flexWrap: 'wrap'
-        }}>
-          {!removeDate && <Box sx={{
-            bgcolor: '#0099ff',
-            px: 1,
-            borderRadius: '4px',
-            fontSize: '0.75rem',
-            fontWeight: 500,
-            color: '#fff'
-          }}>
-            {item.date}
-          </Box>}
-          {!removeTime && <Box sx={{
-            bgcolor: '#1E1E1E',
-            px: 1,
-            borderRadius: '4px',
-            fontSize: '0.75rem',
-            color: '#EDEDED'
-          }}>
-            {item.time}
-          </Box>}
-          <Typography variant="subtitle2" sx={{
-            fontWeight: 700,
-            color: '#0099ff',
-            display: 'flex',
-            alignItems: 'center',
-            gap: 0.5
-          }}>
-            <PersonIcon sx={{ fontSize: '1rem', color: '#0099ff' }}/>
-            {senderName}
-          </Typography>
-        </Box>
-        <Typography variant="body2" sx={{
-          color: '#EDEDED',
-          lineHeight: 1.6,
-          pl: 1.5,
-          position: 'relative',
-          '&:before': {
-            content: '""',
-            position: 'absolute',
-            left: 0,
-            top: 4,
-            height: '16px',
-            width: '2px',
-            bgcolor: '#0099ff',
-            borderRadius: '2px'
-          }
-        }}>
-          {item.message}
-        </Typography>
-      </Box>
-  );
-};
+export default WAScrub;
