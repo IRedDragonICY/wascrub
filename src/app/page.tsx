@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useCallback, useMemo, useEffect } from 'react';
+import React, { useState, useCallback, useMemo, useEffect, useRef } from 'react';
 import JSZip from 'jszip';
 import Image from 'next/image';
 
@@ -40,57 +40,41 @@ export default function WAScrub() {
   const [isDarkMode, setIsDarkMode] = useState(false);
   const [anonymizeSender, setAnonymizeSender] = useState(false);
   const [lastClickedIndex, setLastClickedIndex] = useState<number | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
-  useEffect(() => {
-    const darkModeMediaQuery = window.matchMedia('(prefers-color-scheme: dark)');
-    setIsDarkMode(darkModeMediaQuery.matches);
-    const handler = (e: MediaQueryListEvent) => setIsDarkMode(e.matches);
-    darkModeMediaQuery.addEventListener('change', handler);
+  const processChatText = useCallback((text: string, anonymize: boolean): CleanedMessage[] => {
+    const messageRegex = /^(\d{1,2}\/\d{1,2}\/\d{2}),\s*(\d{1,2}:\d{2}\s*[AP]M)\s*-\s*(.+?):\s*(.+)/;
+    const messages = text.split('\n').reduce<CleanedMessage[]>((acc, line) => {
+      const match = line.trim().match(messageRegex);
+      if (match && match[4]) {
+        return [...acc, {
+          sender: match[3],
+          message: match[4].trim(),
+          date: match[1],
+          time: match[2]
+        }];
+      }
+      return acc;
+    }, []);
 
-    const script = document.createElement('script');
-    script.src = "https://kit.fontawesome.com/0293e2391b.js";
-    script.crossOrigin = "anonymous";
-    script.async = true;
-    document.body.appendChild(script);
+    if (anonymize) {
+      const senderMap = new Map<string, string>();
+      const senders = [...new Set(messages.map(msg => msg.sender))];
+      senders.forEach((sender, index) => senderMap.set(sender, `User${index + 1}`));
+      return messages.map(msg => ({ ...msg, sender: senderMap.get(msg.sender) || msg.sender }));
+    }
 
-    return () => {
-      darkModeMediaQuery.removeEventListener('change', handler);
-      document.body.removeChild(script);
-    };
+    return messages;
   }, []);
 
-  const readFile = (file: File): Promise<string> => {
+  const readFile = useCallback((file: File): Promise<string> => {
     return new Promise((resolve, reject) => {
       const reader = new FileReader();
       reader.onload = () => resolve(reader.result as string);
       reader.onerror = reject;
       reader.readAsText(file);
     });
-  };
-
-  const processChatText = (text: string, anonymize: boolean): CleanedMessage[] => {
-    const messageRegex = /^(\d{1,2}\/\d{1,2}\/\d{2}),\s*(\d{1,2}:\d{2}\s*[AP]M)\s*-\s*(.+?):\s*(.*)/;
-    const messages = text.split('\n').reduce<CleanedMessage[]>((acc, line) => {
-      const match = line.trim().match(messageRegex);
-      return match ? [...acc, {
-        sender: match[3],
-        message: match[4].trim(),
-        date: match[1],
-        time: match[2]
-      }] : acc;
-    }, []);
-
-    if (anonymize) {
-      const senderMap = new Map<string, string>();
-      const senders = [...new Set(messages.map(msg => msg.sender))];
-      senders.forEach((sender, index) => {
-        senderMap.set(sender, `User${index + 1}`);
-      });
-      return messages.map(msg => ({ ...msg, sender: senderMap.get(msg.sender) || msg.sender }));
-    }
-
-    return messages;
-  };
+  }, []);
 
   const handleFiles = useCallback(async (files: FileList) => {
     setProcessing(true);
@@ -100,7 +84,9 @@ export default function WAScrub() {
       for (const file of Array.from(files)) {
         if (file.name.toLowerCase().endsWith('.zip')) {
           const zip = await JSZip.loadAsync(file);
-          const textFiles = Object.values(zip.files).filter(zipFile => !zipFile.dir && zipFile.name.toLowerCase().endsWith('.txt'));
+          const textFiles = Object.values(zip.files).filter(zipFile =>
+              !zipFile.dir && zipFile.name.toLowerCase().endsWith('.txt')
+          );
           for (const textFile of textFiles) {
             const text = await textFile.async('text');
             newFiles.push({
@@ -129,19 +115,54 @@ export default function WAScrub() {
     } finally {
       setProcessing(false);
     }
-  }, [currentFileId, anonymizeSender]);
+  }, [currentFileId, anonymizeSender, processChatText, readFile]);
 
-  const handleDrag = useCallback((e: React.DragEvent) => {
-    e.preventDefault();
-    e.stopPropagation();
-    setDragActive(e.type === 'dragenter' || e.type === 'dragover');
-  }, []);
+  const handleAddFilesClick = () => {
+    fileInputRef.current?.click();
+  };
 
-  const handleDrop = useCallback(async (e: React.DragEvent) => {
-    e.preventDefault();
-    setDragActive(false);
-    if (e.dataTransfer?.files) await handleFiles(e.dataTransfer.files);
+
+  useEffect(() => {
+    const darkModeMediaQuery = window.matchMedia('(prefers-color-scheme: dark)');
+    setIsDarkMode(darkModeMediaQuery.matches);
+    const handler = (e: MediaQueryListEvent) => setIsDarkMode(e.matches);
+    darkModeMediaQuery.addEventListener('change', handler);
+
+    const script = document.createElement('script');
+    script.src = "https://kit.fontawesome.com/0293e2391b.js";
+    script.crossOrigin = "anonymous";
+    script.async = true;
+    document.body.appendChild(script);
+
+    const handleWindowDrag = (e: DragEvent) => {
+      e.preventDefault();
+      e.stopPropagation();
+      if (e.dataTransfer?.types.includes('Files')) setDragActive(true);
+    };
+
+    const handleWindowDragLeave = (e: DragEvent) => {
+      if (e.clientX === 0 && e.clientY === 0) setDragActive(false);
+    };
+
+    const handleWindowDrop = async (e: DragEvent) => {
+      e.preventDefault();
+      setDragActive(false);
+      if (e.dataTransfer?.files) await handleFiles(e.dataTransfer.files);
+    };
+
+    window.addEventListener('dragover', handleWindowDrag);
+    window.addEventListener('dragleave', handleWindowDragLeave);
+    window.addEventListener('drop', handleWindowDrop);
+
+    return () => {
+      darkModeMediaQuery.removeEventListener('change', handler);
+      document.body.removeChild(script);
+      window.removeEventListener('dragover', handleWindowDrag);
+      window.removeEventListener('dragleave', handleWindowDragLeave);
+      window.removeEventListener('drop', handleWindowDrop);
+    };
   }, [handleFiles]);
+
 
   const handleFileClick = useCallback((id: string, e: React.MouseEvent) => {
     const fileIndex = processedFiles.findIndex(file => file.id === id);
@@ -150,17 +171,19 @@ export default function WAScrub() {
     setSelectedFiles(prev => {
       const newSelection = new Set(prev);
       if (e.ctrlKey || e.metaKey) {
-        void (newSelection.has(id) ? newSelection.delete(id) : newSelection.add(id));
+        if (newSelection.has(id)) {
+          newSelection.delete(id);
+        } else {
+          newSelection.add(id);
+        }
         setLastClickedIndex(fileIndex);
       } else if (e.shiftKey && lastClickedIndex !== null) {
         newSelection.clear();
-        const startIndex = Math.min(lastClickedIndex, fileIndex);
-        const endIndex = Math.max(lastClickedIndex, fileIndex);
-        for (let i = startIndex; i <= endIndex; i++) {
+        const [start, end] = [Math.min(lastClickedIndex, fileIndex), Math.max(lastClickedIndex, fileIndex)];
+        for (let i = start; i <= end; i++) {
           newSelection.add(processedFiles[i].id);
         }
-      }
-      else {
+      } else {
         newSelection.clear();
         newSelection.add(id);
         setLastClickedIndex(fileIndex);
@@ -191,13 +214,11 @@ export default function WAScrub() {
     }).join('\n');
   }, [removeDate, removeTime]);
 
-
   const downloadCurrentFile = useCallback(() => {
     const file = processedFiles.find(f => f.id === currentFileId);
     if (!file) return;
 
     const content = downloadFileContent(file);
-
     const link = document.createElement('a');
     link.href = URL.createObjectURL(new Blob([content], { type: 'text/plain' }));
     link.download = `WAScrub_${file.fileName}`;
@@ -211,7 +232,6 @@ export default function WAScrub() {
     if (!file) return;
 
     const jsonContent = JSON.stringify(file.cleanedMessages, null, 2);
-
     const link = document.createElement('a');
     link.href = URL.createObjectURL(new Blob([jsonContent], { type: 'application/json' }));
     link.download = `WAScrub_${file.fileName}.json`;
@@ -226,10 +246,7 @@ export default function WAScrub() {
     const zip = new JSZip();
     selectedFiles.forEach(fileId => {
       const file = processedFiles.find(f => f.id === fileId);
-      if (file) {
-        const content = downloadFileContent(file);
-        zip.file(`WAScrub_${file.fileName}`, content);
-      }
+      if (file) zip.file(`WAScrub_${file.fileName}`, downloadFileContent(file));
     });
 
     const blob = await zip.generateAsync({ type: "blob" });
@@ -240,7 +257,6 @@ export default function WAScrub() {
     link.click();
     document.body.removeChild(link);
   }, [processedFiles, selectedFiles, downloadFileContent]);
-
 
   const currentFile = useMemo(() =>
           processedFiles.find(f => f.id === currentFileId),
@@ -257,173 +273,160 @@ export default function WAScrub() {
       );
       setProcessedFiles(updatedFiles);
     }
-  }, [currentFile, currentFileId, processedFiles, setAnonymizeSender]);
+  }, [currentFile, currentFileId, processedFiles, processChatText]);
 
+  const isMobile = useMemo(() => window.innerWidth <= 768, []);
 
   return (
       <div style={styles.container(isDarkMode)}>
+        {dragActive && (
+            <div style={styles.dragOverlay(isDarkMode)}>
+              <div style={styles.uploadContent}>
+                <i className="fas fa-cloud-upload-alt" style={styles.uploadIcon(isDarkMode)} />
+                <span style={styles.uploadText(isDarkMode)}>Drop files to upload</span>
+                <div style={styles.uploadSubtext(isDarkMode)}>Supports multiple TXT and ZIP files</div>
+              </div>
+            </div>
+        )}
+
         <h1 style={styles.title(isDarkMode)}>
-          <Image src="/icon.webp" alt="Icon" width={32} height={32} style={styles.titleIcon} /> WAScrub
+          <Image src="/icon.webp" alt="Icon" width={40} height={40} style={styles.titleIcon} /> WAScrub
         </h1>
 
-        <div
-            style={styles.uploadZone(isDarkMode, dragActive, processing)}
-            onDragEnter={handleDrag}
-            onDragLeave={handleDrag}
-            onDragOver={handleDrag}
-            onDrop={handleDrop}
-        >
-          <label style={styles.uploadLabel}>
-            <input
-                type="file"
-                accept=".txt, .zip"
-                multiple
-                onChange={(e) => e.target.files && handleFiles(e.target.files)}
-                disabled={processing}
-                style={styles.hiddenInput}
-            />
-            <div style={styles.uploadContent}>
-              {processing ? (
-                  <>
-                    <div style={styles.spinner} />
-                    <span style={styles.processingText(isDarkMode)}>Processing Files...</span>
-                  </>
-              ) : (
-                  <>
-                    <i className="fas fa-cloud-upload-alt" style={styles.uploadIcon(isDarkMode)} />
-                    <span style={styles.uploadText(isDarkMode)}>
-                  Drag & Drop Files or Click to Browse
-                </span>
-                    <div style={styles.uploadSubtext(isDarkMode)}>
-                      Supports multiple TXT and ZIP files
-                    </div>
-                  </>
-              )}
-            </div>
-          </label>
-        </div>
-
-        {error && <div style={styles.errorAlert}>{error}</div>}
-
-        {processedFiles.length > 0 && (
-            <div style={styles.mainContent}>
-              <div style={styles.sidebar(isDarkMode)}>
-                <div style={styles.sidebarHeader}>
-                  <h3 style={styles.sidebarTitle(isDarkMode)}>
-                    <i className="fas fa-file-upload" style={styles.iconSpacing} />
-                    Uploaded Files
-                  </h3>
-                  {selectedFiles.size > 0 && (
-                      <button
-                          onClick={() => deleteFiles([...selectedFiles])}
-                          style={styles.deleteButton}
-                      >
-                        <i className="fas fa-trash" /> ({selectedFiles.size})
-                      </button>
+        {processedFiles.length === 0 ? (
+            <div style={styles.uploadZone(isDarkMode, dragActive, processing)}>
+              <label style={styles.uploadLabel}>
+                <input
+                    type="file"
+                    accept=".txt, .zip"
+                    multiple
+                    onChange={(e) => e.target.files && handleFiles(e.target.files)}
+                    disabled={processing}
+                    style={styles.hiddenInput}
+                />
+                <div style={styles.uploadContent}>
+                  {processing ? (
+                      <>
+                        <div style={styles.spinner} />
+                        <span style={styles.processingText(isDarkMode)}>Processing Files...</span>
+                      </>
+                  ) : (
+                      <>
+                        <i className="fas fa-cloud-upload-alt" style={styles.uploadIcon(isDarkMode)} />
+                        <span style={styles.uploadText(isDarkMode)}>
+                    Drag & Drop Files or Click to Browse
+                  </span>
+                        <div style={styles.uploadSubtext(isDarkMode)}>
+                          Supports multiple TXT and ZIP files
+                        </div>
+                      </>
                   )}
                 </div>
-                <div style={{...getScrollbarStyle(isDarkMode), ...styles.fileList}}>
-                  {processedFiles.map((file) => (
-                      <div
-                          key={file.id}
-                          style={styles.fileItem(
-                              isDarkMode,
-                              currentFileId === file.id,
-                              selectedFiles.has(file.id)
-                          )}
-                          onClick={(e) => handleFileClick(file.id, e)}
-                      >
-                  <span style={styles.fileName(isDarkMode)}>
-                    <i className="fas fa-file-alt" style={styles.iconSpacing} />
-                    {file.fileName} ({file.cleanedMessages.length})
-                  </span>
-                        <button
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              deleteFiles([file.id]);
-                            }}
-                            style={styles.deleteIcon}
+              </label>
+            </div>
+        ) : (
+            <div style={styles.mainContent()}>
+              {error && <div style={styles.errorAlert}>{error}</div>}
+              <div style={styles.contentSection(isDarkMode, isMobile)}>
+                <div style={styles.sidebar(isDarkMode, isMobile)}>
+                  <div style={styles.sidebarHeader}>
+                    <h3 style={styles.sidebarTitle(isDarkMode)}>
+                      <i className="fas fa-file-upload" style={styles.iconSpacing} />
+                      Uploaded Files
+                    </h3>
+                    <div>
+                      <button onClick={handleAddFilesClick} style={styles.addButton}>
+                        <i className="fas fa-plus" /> Add Files
+                      </button>
+                      {selectedFiles.size > 0 && (
+                          <button onClick={() => deleteFiles([...selectedFiles])} style={styles.deleteButton}>
+                            <i className="fas fa-trash" /> Delete ({selectedFiles.size})
+                          </button>
+                      )}
+                    </div>
+                    <input
+                        type="file"
+                        accept=".txt, .zip"
+                        multiple
+                        onChange={(e) => e.target.files && handleFiles(e.target.files)}
+                        disabled={processing}
+                        style={styles.hiddenInput}
+                        ref={fileInputRef}
+                    />
+                  </div>
+                  <div style={{...getScrollbarStyle(isDarkMode), ...styles.fileList}}>
+                    {processedFiles.map((file) => (
+                        <div
+                            key={file.id}
+                            style={styles.fileItem(isDarkMode, currentFileId === file.id, selectedFiles.has(file.id))}
+                            onClick={(e) => handleFileClick(file.id, e)}
                         >
-                          <i className="fas fa-times" style={styles.trashIcon(isDarkMode)} />
-                        </button>
-                      </div>
-                  ))}
+                    <span style={styles.fileName(isDarkMode)}>
+                      <i className="fas fa-file-alt" style={styles.iconSpacing} />
+                      {file.fileName} ({file.cleanedMessages.length})
+                    </span>
+                          <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                deleteFiles([file.id]);
+                              }}
+                              style={styles.deleteIcon}
+                          >
+                            <i className="fas fa-times" style={styles.trashIcon(isDarkMode)} />
+                          </button>
+                        </div>
+                    ))}
+                  </div>
                 </div>
-              </div>
 
-              <div style={styles.previewSection(isDarkMode)}>
-                <div style={styles.previewHeader}>
-                  <div style={styles.options}>
-                    <Checkbox
-                        label={
-                          <>
-                            <i className="fas fa-calendar-times" style={styles.iconSpacing} />
-                            Remove Dates
-                          </>
-                        }
-                        checked={removeDate}
-                        onChange={(e) => setRemoveDate(e.target.checked)}
-                        isDark={isDarkMode}
-                    />
-                    <Checkbox
-                        label={
-                          <>
-                            <i className="fas fa-clock" style={styles.iconSpacing} />
-                            Remove Times
-                          </>
-                        }
-                        checked={removeTime}
-                        onChange={(e) => setRemoveTime(e.target.checked)}
-                        isDark={isDarkMode}
-                    />
-                    <Checkbox
-                        label={
-                          <>
-                            <i className="fas fa-user-secret" style={styles.iconSpacing} />
-                            Anonymize Senders
-                          </>
-                        }
-                        checked={anonymizeSender}
-                        onChange={(e) => handleAnonymizeSenderChange(e.target.checked)}
-                        isDark={isDarkMode}
-                    />
-                  </div>
-                  <div style={styles.downloadButtons}>
-                    <button
-                        onClick={downloadCurrentFile}
-                        style={styles.downloadButton()}
-                        disabled={!currentFile}
-                    >
-                      <i className="fas fa-download" /> Download TXT
-                    </button>
-                    <button
-                        onClick={downloadCurrentFileAsJson}
-                        style={styles.downloadButton()}
-                        disabled={!currentFile}
-                    >
-                      <i className="fas fa-file-code" /> Export JSON
-                    </button>
-                    {selectedFiles.size > 1 && (
-                        <button
-                            onClick={downloadSelectedFilesAsZip}
-                            style={styles.downloadButton()}
-                        >
-                          <i className="fas fa-file-archive" /> Bulk Export TXT
-                        </button>
-                    )}
-                  </div>
-                </div>
-                <div style={{...getScrollbarStyle(isDarkMode), ...styles.messagesList}}>
-                  {currentFile?.cleanedMessages.map((item, index) => (
-                      <MessageItem
-                          key={index}
-                          item={item}
-                          removeDate={removeDate}
-                          removeTime={removeTime}
+                <div style={styles.previewSection(isDarkMode, isMobile)}>
+                  <div style={styles.previewHeader}>
+                    <div style={styles.options}>
+                      <Checkbox
+                          label={<><i className="fas fa-calendar-times" style={styles.iconSpacing} />Remove Dates</>}
+                          checked={removeDate}
+                          onChange={(e) => setRemoveDate(e.target.checked)}
                           isDark={isDarkMode}
-                          anonymizeSender={anonymizeSender}
                       />
-                  ))}
+                      <Checkbox
+                          label={<><i className="fas fa-clock" style={styles.iconSpacing} />Remove Times</>}
+                          checked={removeTime}
+                          onChange={(e) => setRemoveTime(e.target.checked)}
+                          isDark={isDarkMode}
+                      />
+                      <Checkbox
+                          label={<><i className="fas fa-user-secret" style={styles.iconSpacing} />Anonymize Senders</>}
+                          checked={anonymizeSender}
+                          onChange={(e) => handleAnonymizeSenderChange(e.target.checked)}
+                          isDark={isDarkMode}
+                      />
+                    </div>
+                    <div style={styles.downloadButtons}>
+                      <button onClick={downloadCurrentFile} style={styles.downloadButton()} disabled={!currentFile}>
+                        <i className="fas fa-download" style={styles.iconSpacing} /> Download TXT
+                      </button>
+                      <button onClick={downloadCurrentFileAsJson} style={styles.downloadButton()} disabled={!currentFile}>
+                        <i className="fas fa-file-code" style={styles.iconSpacing} /> Export JSON
+                      </button>
+                      {selectedFiles.size > 1 && (
+                          <button onClick={downloadSelectedFilesAsZip} style={styles.downloadButton()}>
+                            <i className="fas fa-file-archive" style={styles.iconSpacing} /> Bulk Export TXT
+                          </button>
+                      )}
+                    </div>
+                  </div>
+                  <div style={{...getScrollbarStyle(isDarkMode), ...styles.messagesList(isMobile)}}>
+                    {currentFile?.cleanedMessages.map((item, index) => (
+                        <MessageItem
+                            key={index}
+                            item={item}
+                            removeDate={removeDate}
+                            removeTime={removeTime}
+                            isDark={isDarkMode}
+                            anonymizeSender={anonymizeSender}
+                        />
+                    ))}
+                  </div>
                 </div>
               </div>
             </div>
@@ -439,12 +442,7 @@ const Checkbox = ({ label, checked, onChange, isDark }: {
   isDark: boolean;
 }) => (
     <label style={styles.option(isDark)}>
-      <input
-          type="checkbox"
-          checked={checked}
-          onChange={onChange}
-          style={styles.checkbox(isDark)}
-      />
+      <input type="checkbox" checked={checked} onChange={onChange} style={styles.checkbox(isDark)} />
       {label}
     </label>
 );
@@ -462,10 +460,10 @@ const MessageItem = ({ item, removeDate, removeTime, isDark, anonymizeSender }: 
         <div style={styles.messageHeader}>
           {!removeDate && <span style={styles.date(isDark)}>{item.date}</span>}
           {!removeTime && <span style={styles.time(isDark)}>{item.time}</span>}
-          <span style={styles.sender()}>
-        <i className="fas fa-user" style={styles.iconSpacing} />
+          <span style={styles.sender(isDark)}>
+          <i className="fas fa-user" style={styles.iconSpacing} />
             {senderName}
-      </span>
+        </span>
         </div>
         <div style={styles.messageText(isDark)}>
           <i className="fas fa-comment-dots" style={styles.iconSpacing} />
@@ -475,288 +473,285 @@ const MessageItem = ({ item, removeDate, removeTime, isDark, anonymizeSender }: 
   );
 };
 
-
 const styles = {
   container: (isDark: boolean): CSSProperties => ({
     width: '100vw',
     height: '100vh',
-    padding: '2rem',
     backgroundColor: isDark ? '#121212' : '#f8f9fa',
-    fontFamily: "'Inter', sans-serif",
+    fontFamily: "'Poppins', sans-serif",
     color: isDark ? '#e0e0e0' : '#2d3436',
     display: 'flex',
     flexDirection: 'column',
-    gap: '1.5rem',
+    overflow: 'hidden',
+    padding: '20px',
   }),
-
+  dragOverlay: (isDark: boolean): CSSProperties => ({
+    position: 'fixed',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: isDark ? 'rgba(0, 0, 0, 0.9)' : 'rgba(255, 255, 255, 0.9)',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    zIndex: 9999,
+    border: `4px dashed ${isDark ? '#0099ff' : '#0099ff'}`,
+    pointerEvents: 'none',
+  }),
   title: (isDark: boolean): CSSProperties => ({
-    fontSize: '2.5rem',
+    fontSize: '2.2rem',
     fontWeight: 700,
     color: isDark ? '#ffffff' : '#1a1a1a',
-    marginBottom: '1rem',
+    marginBottom: '1.5rem',
     textAlign: 'center',
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'center',
+    padding: '0 2rem',
   }),
-
   uploadZone: (isDark: boolean, dragActive: boolean, processing: boolean): CSSProperties => ({
     border: `2px dashed ${isDark ? '#404040' : '#e0e0e0'}`,
-    borderRadius: '16px',
-    padding: '4rem 2rem',
-    marginBottom: '1rem',
+    borderRadius: '12px',
+    padding: '3rem 2rem',
+    margin: '0 2rem',
     transition: 'all 0.3s ease',
-    backgroundColor: dragActive
-        ? (isDark ? '#1f1f1f' : '#f0f0f0')
-        : (isDark ? '#1a1a1a' : '#ffffff'),
+    backgroundColor: dragActive ? (isDark ? '#1f1f1f' : '#f0f0f0') : (isDark ? '#1a1a1a' : '#ffffff'),
     opacity: processing ? 0.7 : 1,
     pointerEvents: processing ? 'none' : 'auto',
-  }),
-
-  uploadLabel: {
-    display: 'block',
-    cursor: 'pointer',
-    textAlign: 'center',
-  } as CSSProperties,
-
-  uploadContent: {
     display: 'flex',
     flexDirection: 'column',
     alignItems: 'center',
-    gap: '1rem',
-  } as CSSProperties,
-
-  mainContent: {
+    justifyContent: 'center',
+    height: 'calc(100vh - 140px)',
+    marginTop: '30px',
+  }),
+  uploadLabel: { display: 'block', cursor: 'pointer', textAlign: 'center' } as CSSProperties,
+  uploadContent: { display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '1rem' } as CSSProperties,
+  mainContent: (): CSSProperties => ({
     flex: 1,
-    display: 'grid',
-    gridTemplateColumns: '300px 1fr',
-    gap: '2rem',
-    height: 'calc(100vh - 180px)',
-    overflow: 'hidden',
-  } as CSSProperties,
-
-  sidebar: (isDark: boolean): CSSProperties => ({
-    backgroundColor: isDark ? '#1a1a1a' : '#ffffff',
-    borderRadius: '16px',
-    padding: '1.5rem',
-    boxShadow: '0 4px 20px rgba(0,0,0,0.08)',
     display: 'flex',
     flexDirection: 'column',
+    gap: '0rem',
+    height: '100%',
+    overflow: 'hidden',
+    borderRadius: '12px',
+    backgroundColor: 'transparent',
   }),
-
+  contentSection: (_isDark: boolean, isMobile: boolean): CSSProperties => ({
+    display: isMobile ? 'flex' : 'grid',
+    flexDirection: isMobile ? 'column' : 'row',
+    gridTemplateColumns: isMobile ? '1fr' : '320px 1fr',
+    gap: '20px',
+    height: '100%',
+  }),
+  sidebar: (isDark: boolean, isMobile: boolean): CSSProperties => ({
+    backgroundColor: isDark ? '#1a1a1a' : '#ffffff',
+    borderRadius: isMobile ? '12px' : '12px',
+    padding: '1.5rem',
+    boxShadow: isMobile ? '0 4px 6px rgba(0,0,0,0.1)' : '0 4px 6px rgba(0,0,0,0.1)',
+    display: 'flex',
+    flexDirection: 'column',
+    width: '100%',
+    marginBottom: isMobile ? '20px' : '0',
+    maxHeight: isMobile ? '300px' : '100%',
+    overflowY: 'auto',
+  }),
   fileItem: (isDark: boolean, isCurrent: boolean, isSelected: boolean): CSSProperties => ({
     display: 'flex',
     alignItems: 'center',
-    padding: '1rem',
-    borderRadius: '12px',
+    padding: '0.8rem 1rem',
+    borderRadius: '8px',
     marginBottom: '0.5rem',
-    backgroundColor: isSelected
-        ? (isDark ? '#2d2d2d' : '#f0f0f0')
-        : 'transparent',
-    border: isCurrent ? `2px solid ${isDark ? '#0070f3' : '#0070f3'}` : 'none',
+    backgroundColor: isSelected ? (isDark ? '#2d2d2d' : '#f0f0f0') : 'transparent',
+    border: isCurrent ? `2px solid ${isDark ? '#0099ff' : '#0099ff'}` : 'none',
     transition: 'all 0.2s ease',
     cursor: 'pointer',
   }),
-
   uploadIcon: (isDark: boolean): CSSProperties => ({
-    fontSize: '3.5rem',
-    color: isDark ? '#e0e0e0' : '#0070f3',
+    fontSize: '3rem',
+    color: isDark ? '#e0e0e0' : '#0099ff',
     marginBottom: '1rem',
   }),
-
-  fileList: {
-    flex: 1,
-    paddingRight: '0.5rem',
-  } as CSSProperties,
-
-  previewSection: (isDark: boolean): CSSProperties => ({
+  fileList: { flex: 1, paddingRight: '0.5rem', overflowY: 'auto', height: '100%' } as CSSProperties,
+  previewSection: (isDark: boolean, isMobile: boolean): CSSProperties => ({
     backgroundColor: isDark ? '#1e1e1e' : '#ffffff',
-    borderRadius: '16px',
+    borderRadius: '12px',
     padding: '1.5rem',
     display: 'flex',
     flexDirection: 'column',
-    boxShadow: '0 4px 20px rgba(0,0,0,0.08)',
+    boxShadow: isMobile ? '0 4px 6px rgba(0,0,0,0.1)' : '0 4px 6px rgba(0,0,0,0.1)',
     height: '100%',
     overflow: 'auto',
+    width: '100%',
+    maxHeight: isMobile ? '500px' : '100%',
   }),
-
-  messagesList: {
+  messagesList: (isMobile: boolean): CSSProperties => ({
     flex: 1,
     paddingRight: '1rem',
     marginTop: '1rem',
-  } as CSSProperties,
-
+    overflowY: 'auto',
+    height: '100%',
+    paddingLeft: isMobile ? '1rem' : '0',
+  }),
   message: (isDark: boolean): CSSProperties => ({
     backgroundColor: isDark ? '#2d2d2d' : '#f8f9fa',
-    borderRadius: '8px',
-    padding: '1rem',
+    borderRadius: '12px',
+    padding: '1.2rem',
     marginBottom: '1rem',
+    boxShadow: '0 1px 3px rgba(0,0,0,0.08)',
   }),
-
-  titleIcon: {
-    marginRight: '0.8rem',
-    color: '#0070f3',
-  } as CSSProperties,
-
-  iconSpacing: {
-    marginRight: '0.5rem',
-  } as CSSProperties,
-
+  titleIcon: { marginRight: '1rem', color: '#0099ff' } as CSSProperties,
+  iconSpacing: { marginRight: '0.5rem' } as CSSProperties,
   processingText: (isDark: boolean): CSSProperties => ({
     color: isDark ? '#e0e0e0' : '#666',
-    fontSize: '1.1rem',
+    fontSize: '1rem',
   }),
-
   uploadText: (isDark: boolean): CSSProperties => ({
     color: isDark ? '#e0e0e0' : '#666',
-    fontSize: '1.2rem',
+    fontSize: '1.1rem',
     fontWeight: 500,
   }),
-
   uploadSubtext: (isDark: boolean): CSSProperties => ({
     fontSize: '0.9rem',
     color: isDark ? '#a0a0a0' : '#999',
   }),
-
-  hiddenInput: {
-    display: 'none',
-  } as CSSProperties,
-
+  hiddenInput: { display: 'none' } as CSSProperties,
   errorAlert: {
     backgroundColor: '#ffe3e3',
     color: '#ff0000',
     padding: '1rem',
     borderRadius: '8px',
-    marginBottom: '1rem',
+    marginBottom: '1.5rem',
+    margin: '0 2rem',
   } as CSSProperties,
-
   sidebarHeader: {
     display: 'flex',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: '1.5rem',
+    marginBottom: '1rem',
   } as CSSProperties,
-
   sidebarTitle: (isDark: boolean): CSSProperties => ({
     margin: 0,
-    fontSize: '1.2rem',
+    fontSize: '1.1rem',
     fontWeight: 600,
     color: isDark ? '#e0e0e0' : '#1a1a1a',
   }),
-
   fileName: (isDark: boolean): CSSProperties => ({
     flex: 1,
-    fontSize: '0.95rem',
+    fontSize: '0.9rem',
     overflow: 'hidden',
     textOverflow: 'ellipsis',
     whiteSpace: 'nowrap',
     color: isDark ? '#e0e0e0' : '#1a1a1a',
     userSelect: 'none',
   }),
-
   deleteButton: {
     padding: '0.5rem 1rem',
     backgroundColor: '#ff4757',
     color: 'white',
     border: 'none',
-    borderRadius: '8px',
+    borderRadius: '6px',
     cursor: 'pointer',
     transition: 'background-color 0.2s',
+    marginLeft: '0.5rem',
+    fontSize: '0.85rem',
   } as CSSProperties,
-
-  deleteIcon: {
-    background: 'none',
+  addButton: {
+    padding: '0.5rem 1rem',
+    backgroundColor: '#0099ff',
+    color: 'white',
     border: 'none',
-    padding: '0.25rem',
+    borderRadius: '6px',
     cursor: 'pointer',
+    transition: 'background-color 0.2s',
+    fontSize: '0.85rem',
   } as CSSProperties,
-
+  deleteIcon: { background: 'none', border: 'none', padding: '0.25rem', cursor: 'pointer' } as CSSProperties,
   trashIcon: (isDark: boolean): CSSProperties => ({
-    fontSize: '1rem',
+    fontSize: '0.9rem',
     color: isDark ? '#e0e0e0' : '#666',
   }),
-
   previewHeader: {
     display: 'flex',
     justifyContent: 'space-between',
     alignItems: 'center',
     marginBottom: '1.5rem',
     gap: '1rem',
-  } as CSSProperties,
-
+    flexDirection: 'column' as React.CSSProperties['flexDirection'],
+    padding: '0 1rem',
+  },
   options: {
     display: 'flex',
     gap: '1.5rem',
     alignItems: 'center',
+    flexWrap: 'wrap',
+    justifyContent: 'flex-start',
   } as CSSProperties,
-
   option: (isDark: boolean): CSSProperties => ({
     display: 'flex',
     alignItems: 'center',
     gap: '0.5rem',
     color: isDark ? '#e0e0e0' : '#666',
-    fontSize: '0.95rem',
+    fontSize: '0.9rem',
   }),
-
   checkbox: (isDark: boolean): CSSProperties => ({
-    width: 18,
-    height: 18,
-    accentColor: '#0070f3',
+    width: 16,
+    height: 16,
+    accentColor: '#0099ff',
     backgroundColor: isDark ? '#404040' : 'white',
     borderRadius: '4px',
+    border: isDark ? '1px solid #555' : '1px solid #ccc',
   }),
-
   downloadButtons: {
     display: 'flex',
-    gap: '1rem',
+    gap: '0.75rem',
+    justifyContent: 'flex-start',
+    flexWrap: 'wrap',
   } as CSSProperties,
-
-
   downloadButton: (): CSSProperties => ({
-    padding: '0.75rem 1.5rem',
-    backgroundColor: '#0070f3',
+    padding: '0.6rem 1.2rem',
+    backgroundColor: '#0099ff',
     color: 'white',
     border: 'none',
-    borderRadius: '8px',
+    borderRadius: '6px',
     cursor: 'pointer',
-    fontSize: '0.95rem',
+    fontSize: '0.85rem',
     transition: 'background-color 0.2s',
+    whiteSpace: 'nowrap',
   }),
-
   messageHeader: {
     display: 'flex',
-    gap: '1rem',
+    gap: '0.75rem',
     alignItems: 'baseline',
-    marginBottom: '0.75rem',
-  } as CSSProperties,
-
+    marginBottom: '0.6rem',
+    padding: '0 1rem',
+  },
   date: (isDark: boolean): CSSProperties => ({
-    fontSize: '0.85rem',
+    fontSize: '0.8rem',
     color: isDark ? '#a0a0a0' : '#666',
   }),
-
   time: (isDark: boolean): CSSProperties => ({
-    fontSize: '0.85rem',
+    fontSize: '0.8rem',
     color: isDark ? '#a0a0a0' : '#666',
   }),
-
-  sender: (): CSSProperties => ({
+  sender: (isDark: boolean): CSSProperties => ({
     fontWeight: 600,
-    color: '#0070f3',
-    fontSize: '0.95rem',
+    color: isDark ? '#0099ff' : '#0099ff',
+    fontSize: '0.9rem',
   }),
-
   messageText: (isDark: boolean): CSSProperties => ({
     color: isDark ? '#e0e0e0' : '#333',
-    lineHeight: '1.6',
+    lineHeight: '1.5',
     whiteSpace: 'pre-wrap',
+    padding: '0 1rem',
+    fontSize: '0.9rem',
   }),
-
   spinner: {
-    width: 28,
-    height: 28,
-    border: '3px solid rgba(0, 112, 243, 0.3)',
-    borderTopColor: '#0070f3',
+    width: 24,
+    height: 24,
+    border: '3px solid rgba(0, 153, 255, 0.3)',
+    borderTopColor: '#0099ff',
     borderRadius: '50%',
     animation: 'spin 1s linear infinite',
   } as CSSProperties,
