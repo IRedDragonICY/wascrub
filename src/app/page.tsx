@@ -2,6 +2,7 @@
 
 import React, { useState, useCallback, useMemo, useEffect } from 'react';
 import JSZip from 'jszip';
+import Image from 'next/image';
 
 interface CleanedMessage {
   sender: string;
@@ -262,7 +263,7 @@ export default function WAScrub() {
   return (
       <div style={styles.container(isDarkMode)}>
         <h1 style={styles.title(isDarkMode)}>
-          <i className="fas fa-comments" style={styles.titleIcon} /> WAScrub
+          <Image src="/icon.webp" alt="Icon" width={32} height={32} style={styles.titleIcon} /> WAScrub
         </h1>
 
         <div
