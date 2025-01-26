@@ -1,6 +1,9 @@
-# WAScrub 💬✨
 
-**Clean  WhatsApp Chat Exports with Style**
+<h1 align="center">WAScrub</h1>
+<p align="center">
+  <img src="./public/icon.webp" alt="Logo" width="256" height="256">
+</p>
+<p align="center"><strong>Clean WhatsApp Chat Exports with Style</strong></p>
 
 ---
 
@@ -101,7 +104,7 @@ npm run build
 
 ## 📄 License
 
-MIT License - see [LICENSE.md](LICENSE.md) for details
+MIT License - see [LICENSE](LICENSE) for details
 
 ---
 
