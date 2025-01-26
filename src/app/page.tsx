@@ -9,6 +9,7 @@ interface CleanedMessage {
   message: string;
   date: string;
   time: string;
+  isMediaOmitted: boolean;
 }
 
 interface ProcessedFile {
@@ -41,17 +42,20 @@ export default function WAScrub() {
   const [anonymizeSender, setAnonymizeSender] = useState(false);
   const [lastClickedIndex, setLastClickedIndex] = useState<number | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const [deleteMediaOmitted, setDeleteMediaOmitted] = useState(false);
 
   const processChatText = useCallback((text: string, anonymize: boolean): CleanedMessage[] => {
     const messageRegex = /^(\d{1,2}\/\d{1,2}\/\d{2}),\s*(\d{1,2}:\d{2}\s*[AP]M)\s*-\s*(.+?):\s*(.+)/;
     const messages = text.split('\n').reduce<CleanedMessage[]>((acc, line) => {
       const match = line.trim().match(messageRegex);
       if (match && match[4]) {
+        const messageText = match[4].trim();
         return [...acc, {
           sender: match[3],
-          message: match[4].trim(),
+          message: messageText,
           date: match[1],
-          time: match[2]
+          time: match[2],
+          isMediaOmitted: messageText === '<Media omitted>'
         }];
       }
       return acc;
@@ -205,14 +209,16 @@ export default function WAScrub() {
   }, [currentFileId]);
 
   const downloadFileContent = useCallback((file: ProcessedFile) => {
-    return file.cleanedMessages.map(item => {
-      const prefix = [
-        removeDate ? null : item.date,
-        removeTime ? null : item.time
-      ].filter(Boolean).join(', ');
-      return `${prefix ? `${prefix} - ` : ''}${item.sender}: ${item.message}`;
-    }).join('\n');
-  }, [removeDate, removeTime]);
+    return file.cleanedMessages
+        .filter(msg => !deleteMediaOmitted || !msg.isMediaOmitted)
+        .map(item => {
+          const prefix = [
+            removeDate ? null : item.date,
+            removeTime ? null : item.time
+          ].filter(Boolean).join(', ');
+          return `${prefix ? `${prefix} - ` : ''}${item.sender}: ${item.message}`;
+        }).join('\n');
+  }, [removeDate, removeTime, deleteMediaOmitted]);
 
   const downloadCurrentFile = useCallback(() => {
     const file = processedFiles.find(f => f.id === currentFileId);
@@ -231,14 +237,15 @@ export default function WAScrub() {
     const file = processedFiles.find(f => f.id === currentFileId);
     if (!file) return;
 
-    const jsonContent = JSON.stringify(file.cleanedMessages, null, 2);
+    const filteredMessages = file.cleanedMessages.filter(msg => !deleteMediaOmitted || !msg.isMediaOmitted);
+    const jsonContent = JSON.stringify(filteredMessages, null, 2);
     const link = document.createElement('a');
     link.href = URL.createObjectURL(new Blob([jsonContent], { type: 'application/json' }));
     link.download = `WAScrub_${file.fileName}.json`;
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
-  }, [currentFileId, processedFiles]);
+  }, [currentFileId, processedFiles, deleteMediaOmitted]);
 
   const downloadSelectedFilesAsZip = useCallback(async () => {
     if (selectedFiles.size === 0) return;
@@ -400,6 +407,12 @@ export default function WAScrub() {
                           onChange={(e) => handleAnonymizeSenderChange(e.target.checked)}
                           isDark={isDarkMode}
                       />
+                      <Checkbox
+                          label={<><i className="fas fa-image" style={styles.iconSpacing} />Delete Media Omitted</>}
+                          checked={deleteMediaOmitted}
+                          onChange={(e) => setDeleteMediaOmitted(e.target.checked)}
+                          isDark={isDarkMode}
+                      />
                     </div>
                     <div style={styles.downloadButtons}>
                       <button onClick={downloadCurrentFile} style={styles.downloadButton()} disabled={!currentFile}>
@@ -416,16 +429,18 @@ export default function WAScrub() {
                     </div>
                   </div>
                   <div style={{...getScrollbarStyle(isDarkMode), ...styles.messagesList(isMobile)}}>
-                    {currentFile?.cleanedMessages.map((item, index) => (
-                        <MessageItem
-                            key={index}
-                            item={item}
-                            removeDate={removeDate}
-                            removeTime={removeTime}
-                            isDark={isDarkMode}
-                            anonymizeSender={anonymizeSender}
-                        />
-                    ))}
+                    {currentFile?.cleanedMessages
+                        .filter(item => !deleteMediaOmitted || !item.isMediaOmitted)
+                        .map((item, index) => (
+                            <MessageItem
+                                key={index}
+                                item={item}
+                                removeDate={removeDate}
+                                removeTime={removeTime}
+                                isDark={isDarkMode}
+                                anonymizeSender={anonymizeSender}
+                            />
+                        ))}
                   </div>
                 </div>
               </div>
